@@ -1,0 +1,2 @@
+# Nulufar-boti-chatgpti
+Xotinim
