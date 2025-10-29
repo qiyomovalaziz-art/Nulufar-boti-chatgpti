@@ -17,7 +17,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     await update.message.reply_text(
         f"Assalomu alaykum, {user_name}! 🤖\n"
-        "Baxtiyorovna_r😍 Botga xush kelibsiz!\n"
+        "Nulufarxon😍 Botga xush kelibsiz!\n"
         "Savol yozing yoki rasm yuboring — men yordam beraman ✍️📸"
     )
 
