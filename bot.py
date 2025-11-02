@@ -1,20 +1,63 @@
 import os
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
 from openai import OpenAI
+from datetime import datetime
+import json
+import matplotlib.pyplot as plt
 
+# .env fayldan o‘qish
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))  # Sizning Telegram ID’ingiz
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Foydalanuvchi ma’lumotlari saqlanadigan fayl
+USERS_FILE = "users.json"
 
-# ✅ /start bosilganda foydalanuvchi ismi bilan kutib olish
+
+# 📁 JSON fayldan o‘qish
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+# 💾 JSON faylga yozish
+def save_users(users):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+
+# ✅ /start komandasi
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_name = update.effective_user.first_name
+    user = update.effective_user
+    user_name = user.first_name
+    user_id = user.id
+
+    users = load_users()
+
+    # Yangi foydalanuvchini ro‘yxatga olish
+    if str(user_id) not in users:
+        users[str(user_id)] = {
+            "name": user_name,
+            "joined_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        save_users(users)
+
+        # Admin'ga xabar yuborish
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"🆕 Yangi foydalanuvchi kirdi!\n👤 Ism: {user_name}\n🆔 ID: {user_id}"
+        )
+
     await update.message.reply_text(
         f"Assalomu alaykum, {user_name}! 🤖\n"
         "Nulufarxon😍 Botga xush kelibsiz!\n"
@@ -42,7 +85,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    image_url = file.file_path  # Telegramdan rasmi URL holida keladi
+    image_url = file.file_path
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -59,13 +102,81 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(answer)
 
 
+# 🧑‍💼 Admin panel — /admin
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Sizda bu buyruqdan foydalanish huquqi yo‘q.")
+        return
+
+    users = load_users()
+    total = len(users)
+
+    if total == 0:
+        await update.message.reply_text("👥 Hozircha hech kim botga kirmagan.")
+        return
+
+    text = f"📊 <b>Foydalanuvchilar ro‘yxati</b>\n\n"
+    for i, (uid, info) in enumerate(users.items(), 1):
+        text += f"{i}. {info['name']} — {info['joined_at']}\n"
+
+    text += f"\n<b>Jami:</b> {total} ta foydalanuvchi 👥"
+
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+# 📈 /stats — foydalanuvchilar soni grafigi
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Sizda bu buyruqdan foydalanish huquqi yo‘q.")
+        return
+
+    users = load_users()
+    if not users:
+        await update.message.reply_text("📉 Hali hech kim botga kirmagan.")
+        return
+
+    # Sanalar va o‘sish grafigi
+    dates = [datetime.strptime(u["joined_at"], "%Y-%m-%d %H:%M:%S").date() for u in users.values()]
+    dates.sort()
+
+    # Kun bo‘yicha sanash
+    counts = {}
+    for d in dates:
+        counts[d] = counts.get(d, 0) + 1
+
+    x = list(counts.keys())
+    y = []
+    total = 0
+    for d in x:
+        total += counts[d]
+        y.append(total)
+
+    # Grafik chizish
+    plt.figure()
+    plt.plot(x, y, marker="o")
+    plt.title("📈 Bot foydalanuvchilari soni o‘sishi")
+    plt.xlabel("Sana")
+    plt.ylabel("Jami foydalanuvchilar")
+    plt.grid(True)
+
+    img_path = "stats.png"
+    plt.savefig(img_path)
+    plt.close()
+
+    await context.bot.send_photo(chat_id=ADMIN_ID, photo=open(img_path, "rb"))
+
+
 # ✅ Asosiy ishga tushirish
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # Rasm qo‘shildi ✅
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     app.run_polling()
 
